@@ -3410,6 +3410,55 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
         apply_cheats();
 }
 
+/* ---- Config-driven auto-load save state (cross-platform) ------------ *
+ * On the first frame after a ROM loads, the core reads a config file that
+ * sits next to it and is named after it: e.g. "genesis_plus_gx_libretro.cfg"
+ * beside "genesis_plus_gx_libretro.dll" (Windows) or
+ * "genesis_plus_gx_libretro_android.cfg" beside
+ * "genesis_plus_gx_libretro_android.so" (Android). If enabled, it loads:
+ *
+ *     <save_path>/<rom-name-without-extension>.<state_ext>
+ *
+ * Genesis Plus GX is a multi-system core; list several save_path lines to
+ * cover each system's folder (MegaDrive, MasterSystem, GameGear, etc.).
+ *
+ * Example config (genesis_plus_gx_libretro.cfg):
+ *     enabled   = 1
+ *     save_path = G:\RetroBat\saves\SegaMD\libretro.genesis_plus_gx
+ *     save_path = G:\RetroBat\saves\SegaMS\libretro.genesis_plus_gx
+ *     save_path = G:\RetroBat\saves\SegaGG\libretro.genesis_plus_gx
+ *     state_ext = state.auto
+ *
+ * A line "[autoload] ..." is written both to the RetroArch log and to
+ * "autoload.log" beside the core, so problems are easy to diagnose.
+ *
+ * NOTE: Genesis Plus GX declares log_cb as a bare function pointer
+ * (retro_log_printf_t log_cb), so this block calls log_cb(...) directly,
+ * NOT log_cb.log(...) as in the fceumm version.                            */
+
+#ifdef _WIN32
+#include <windows.h>
+#include <time.h>
+#define AUTOLOAD_STRCASECMP _stricmp
+#define AUTOLOAD_MAX_PATH   MAX_PATH
+#define AUTOLOAD_PATH_SEP   '\\'
+#else
+#include <dlfcn.h>
+#include <time.h>
+#include <strings.h>
+#define AUTOLOAD_STRCASECMP strcasecmp
+#define AUTOLOAD_MAX_PATH   4096
+#define AUTOLOAD_PATH_SEP   '/'
+#endif
+
+#define AUTOLOAD_MAX_RUNS  25   /* keep only the latest N runs in autoload.log */
+#define AUTOLOAD_MAX_PATHS 16   /* max number of save_path entries in the config */
+
+static bool autoload_state_pending      = false;
+static char autoload_dir[AUTOLOAD_MAX_PATH]      = {0};
+static char autoload_rom_path[AUTOLOAD_MAX_PATH] = {0};
+static char autoload_core_name[64]      = {0};
+
 bool retro_load_game(const struct retro_game_info *info)
 {
    int i;
@@ -3874,55 +3923,6 @@ void retro_reset(void)
 extern int8 audio_hard_disable;
 
 extern void sound_update_fm_function_pointers(void);
-
-/* ---- Config-driven auto-load save state (cross-platform) ------------ *
- * On the first frame after a ROM loads, the core reads a config file that
- * sits next to it and is named after it: e.g. "genesis_plus_gx_libretro.cfg"
- * beside "genesis_plus_gx_libretro.dll" (Windows) or
- * "genesis_plus_gx_libretro_android.cfg" beside
- * "genesis_plus_gx_libretro_android.so" (Android). If enabled, it loads:
- *
- *     <save_path>/<rom-name-without-extension>.<state_ext>
- *
- * Genesis Plus GX is a multi-system core; list several save_path lines to
- * cover each system's folder (MegaDrive, MasterSystem, GameGear, etc.).
- *
- * Example config (genesis_plus_gx_libretro.cfg):
- *     enabled   = 1
- *     save_path = G:\RetroBat\saves\SegaMD\libretro.genesis_plus_gx
- *     save_path = G:\RetroBat\saves\SegaMS\libretro.genesis_plus_gx
- *     save_path = G:\RetroBat\saves\SegaGG\libretro.genesis_plus_gx
- *     state_ext = state.auto
- *
- * A line "[autoload] ..." is written both to the RetroArch log and to
- * "autoload.log" beside the core, so problems are easy to diagnose.
- *
- * NOTE: Genesis Plus GX declares log_cb as a bare function pointer
- * (retro_log_printf_t log_cb), so this block calls log_cb(...) directly,
- * NOT log_cb.log(...) as in the fceumm version.                            */
-
-#ifdef _WIN32
-#include <windows.h>
-#include <time.h>
-#define AUTOLOAD_STRCASECMP _stricmp
-#define AUTOLOAD_MAX_PATH   MAX_PATH
-#define AUTOLOAD_PATH_SEP   '\\'
-#else
-#include <dlfcn.h>
-#include <time.h>
-#include <strings.h>
-#define AUTOLOAD_STRCASECMP strcasecmp
-#define AUTOLOAD_MAX_PATH   4096
-#define AUTOLOAD_PATH_SEP   '/'
-#endif
-
-#define AUTOLOAD_MAX_RUNS  25   /* keep only the latest N runs in autoload.log */
-#define AUTOLOAD_MAX_PATHS 16   /* max number of save_path entries in the config */
-
-static bool autoload_state_pending      = false;
-static char autoload_dir[AUTOLOAD_MAX_PATH]      = {0};
-static char autoload_rom_path[AUTOLOAD_MAX_PATH] = {0};
-static char autoload_core_name[64]      = {0};
 
 /* Directory that THIS core (.dll/.so) lives in. */
 static void autoload_get_self_dir(char *out, size_t out_size)
