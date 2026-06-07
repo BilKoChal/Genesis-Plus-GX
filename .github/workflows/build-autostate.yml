@@ -1,19 +1,19 @@
 # .github/workflows/build-autostate.yml
 #
 # Builds the patched genesis_plus_gx_libretro core for:
-#   • Windows 64-bit  (MinGW cross-compile on Ubuntu)
-#   • Windows 32-bit  (MinGW cross-compile on Ubuntu)
-#   • Linux 64-bit
-#   • Android arm64-v8a
-#   • Android armeabi-v7a
-#   • Android x86_64
+#   - Windows 64-bit  (MinGW cross-compile on Ubuntu)
+#   - Windows 32-bit  (MinGW cross-compile on Ubuntu)
+#   - Linux 64-bit
+#   - Android arm64-v8a
+#   - Android armeabi-v7a
+#   - Android x86_64
 #
 # Artifacts are uploaded so you can download them directly from the
 # GitHub Actions run page without needing a release.
 #
 # Trigger: every push and pull-request, plus manual dispatch.
 
-name: Build Genesis Plus GX autostate
+name: Build genesis_plus_gx autostate
 
 on:
   push:
@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install MinGW-w64 toolchain
         run: |
@@ -42,7 +44,6 @@ jobs:
       - name: Build
         run: |
           make -f Makefile.libretro \
-               platform=win \
                CC=x86_64-w64-mingw32-gcc \
                CXX=x86_64-w64-mingw32-g++ \
                -j$(nproc)
@@ -65,6 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install MinGW-w64 toolchain (32-bit)
         run: |
@@ -77,7 +80,6 @@ jobs:
       - name: Build
         run: |
           make -f Makefile.libretro \
-               platform=win \
                CC=i686-w64-mingw32-gcc \
                CXX=i686-w64-mingw32-g++ \
                -j$(nproc)
@@ -100,6 +102,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -124,10 +128,10 @@ jobs:
   # ------------------------------------------------------------------ #
   # Android — arm64-v8a / armeabi-v7a / x86_64                        #
   #                                                                    #
-  # The Genesis Plus GX Makefile.libretro has no "android" platform    #
-  # case; it falls through to unix. We use platform=unix with the NDK  #
-  # Clang toolchain overriding CC/CXX, and override SHARED to drop     #
-  # the version-script (Android linker does not support it).           #
+  # The Genesis Plus GX Makefile.libretro uses platform=unix for      #
+  # Android NDK cross-compile (same as fceumm). We override CC/CXX   #
+  # with NDK Clang and drop the version-script from SHARED (Android   #
+  # linker does not support it).                                       #
   # ------------------------------------------------------------------ #
   build-android:
     name: Android ${{ matrix.abi }}
@@ -156,6 +160,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install NDK
         run: |
@@ -184,8 +190,8 @@ jobs:
             AR="$AR" \
             RANLIB="$RANLIB" \
             STRIP="$STRIP" \
-            LDFLAGS="-ldl" \
             SHARED="-shared -fPIC" \
+            LDFLAGS="-ldl" \
             -j$(nproc)
 
       - name: Stage artifact
