@@ -3439,6 +3439,8 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
 #ifdef _WIN32
 #include <windows.h>
 #include <time.h>
+#include <string.h>
+#include <errno.h>
 #define AUTOLOAD_STRCASECMP _stricmp
 #define AUTOLOAD_MAX_PATH   MAX_PATH
 #define AUTOLOAD_PATH_SEP   '\\'
@@ -3446,6 +3448,8 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
 #include <dlfcn.h>
 #include <time.h>
 #include <strings.h>
+#include <string.h>
+#include <errno.h>
 #define AUTOLOAD_STRCASECMP strcasecmp
 #define AUTOLOAD_MAX_PATH   4096
 #define AUTOLOAD_PATH_SEP   '/'
@@ -3981,14 +3985,16 @@ static void autoload_get_self_name(char *out, size_t out_size)
    Dl_info info;
    if (dladdr((const void *)&autoload_get_self_name, &info) && info.dli_fname)
    {
+      char  fullpath[4096];   /* large buffer for the full dli_fname path */
       char *slash, *dot, *base;
-      strncpy(out, info.dli_fname, out_size - 1);
-      out[out_size - 1] = '\0';
-      slash = strrchr(out, '/');
-      base  = slash ? slash + 1 : out;
-      if (base != out) memmove(out, base, strlen(base) + 1);
-      dot = strrchr(out, '.');
+      strncpy(fullpath, info.dli_fname, sizeof(fullpath) - 1);
+      fullpath[sizeof(fullpath) - 1] = '\0';
+      slash = strrchr(fullpath, '/');
+      base  = slash ? slash + 1 : fullpath;
+      dot   = strrchr(base, '.');
       if (dot) *dot = '\0';
+      strncpy(out, base, out_size - 1);
+      out[out_size - 1] = '\0';
    }
 #endif
 }
@@ -4027,7 +4033,16 @@ static void autoload_logf(const char *fmt, ...)
       FILE *fp;
       snprintf(logpath, sizeof(logpath), "%s%cautoload.log", autoload_dir, AUTOLOAD_PATH_SEP);
       fp = fopen(logpath, "a");
-      if (fp) { fprintf(fp, "%s\n", line); fclose(fp); }
+      if (fp)
+      {
+         fprintf(fp, "%s\n", line);
+         fclose(fp);
+      }
+      else if (log_cb)
+      {
+         log_cb(RETRO_LOG_WARN, "[autoload] could not write to %s (errno=%d)\n",
+                logpath, errno);
+      }
    }
 }
 
