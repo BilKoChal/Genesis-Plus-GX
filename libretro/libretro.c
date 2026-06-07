@@ -158,7 +158,6 @@ static size_t g_rom_size      = 0;
 static char *save_dir         = NULL;
 
 retro_log_printf_t log_cb;
-static void default_logger(enum retro_log_level level, const char *fmt, ...) { (void)level; (void)fmt; }
 static retro_video_refresh_t video_cb;
 static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
@@ -3447,9 +3446,8 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
 #define AUTOLOAD_MAX_PATHS 16  /* max number of save_path entries in the config */
 
 static bool autoload_state_pending      = false;
-static char autoload_dir[AUTOLOAD_MAX_PATH]      = {0};   /* folder the core lives in            */
-static char autoload_log_dir[AUTOLOAD_MAX_PATH]  = {0};   /* folder for autoload.log (may differ) */
-static char autoload_rom_path[AUTOLOAD_MAX_PATH] = {0};   /* full path of the loaded ROM          */
+static char autoload_dir[AUTOLOAD_MAX_PATH]      = {0};   /* folder the core lives in */
+static char autoload_rom_path[AUTOLOAD_MAX_PATH] = {0};   /* full path of the loaded ROM   */
 static char autoload_core_name[64]      = {0};   /* this core's file name, no ext */
 
 /* Directory that THIS core (.dll/.so) lives in. */
@@ -3536,77 +3534,9 @@ static void autoload_get_self_cfg(char *out, size_t out_size)
       snprintf(out, out_size, "%s.cfg", name);
 }
 
-/* Try multiple methods to find the directory the core library lives in.
- * Falls back to RetroArch environment callbacks if the OS-specific method
- * (GetModuleHandleExA / dladdr) fails. Also sets autoload_log_dir so the
- * log file can always be written somewhere accessible. */
-static void autoload_ensure_dir(void)
-{
-   /* --- Method 1: OS-specific API (GetModuleHandleExA / dladdr) --- */
-   autoload_get_self_dir(autoload_dir, sizeof(autoload_dir));
-   if (autoload_dir[0] != '\0')
-   {
-      /* Core directory found — log goes next to the core */
-      strncpy(autoload_log_dir, autoload_dir, sizeof(autoload_log_dir) - 1);
-      autoload_log_dir[sizeof(autoload_log_dir) - 1] = '\0';
-      log_cb(RETRO_LOG_INFO, "[autoload] core dir resolved via OS API: %s\n", autoload_dir);
-      return;
-   }
-
-   log_cb(RETRO_LOG_WARN, "[autoload] OS API failed, trying fallbacks...\n");
-
-   /* --- Method 2: RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY --- */
-   if (environ_cb)
-   {
-      const char *sys_dir = NULL;
-      if (environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &sys_dir)
-          && sys_dir && sys_dir[0])
-      {
-         strncpy(autoload_dir, sys_dir, sizeof(autoload_dir) - 1);
-         autoload_dir[sizeof(autoload_dir) - 1] = '\0';
-         strncpy(autoload_log_dir, autoload_dir, sizeof(autoload_log_dir) - 1);
-         autoload_log_dir[sizeof(autoload_log_dir) - 1] = '\0';
-         log_cb(RETRO_LOG_INFO, "[autoload] core dir resolved via system dir: %s\n", autoload_dir);
-         return;
-      }
-   }
-
-   /* --- Method 3: RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY --- */
-   if (environ_cb)
-   {
-      const char *save_dir_ptr = NULL;
-      if (environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir_ptr)
-          && save_dir_ptr && save_dir_ptr[0])
-      {
-         /* Use save directory for both config search and log.
-          * The config file should also be placed here as a fallback. */
-         strncpy(autoload_dir, save_dir_ptr, sizeof(autoload_dir) - 1);
-         autoload_dir[sizeof(autoload_dir) - 1] = '\0';
-         strncpy(autoload_log_dir, autoload_dir, sizeof(autoload_log_dir) - 1);
-         autoload_log_dir[sizeof(autoload_log_dir) - 1] = '\0';
-         log_cb(RETRO_LOG_INFO, "[autoload] core dir resolved via save dir: %s\n", autoload_dir);
-         return;
-      }
-   }
-
-   /* All methods failed — at least set log_dir to something so we can
-    * attempt writing autoload.log in the current working directory. */
-   autoload_dir[0]     = '\0';
-   autoload_log_dir[0] = '\0';
-   log_cb(RETRO_LOG_WARN,
-         "[autoload] could not resolve core directory by any method. "
-         "Config file cannot be found. Check that the core .dll/.so "
-         "and its .cfg are in the same folder.\n");
-}
-
-/* Write a line to autoload.log AND to the RetroArch log.
+/* Write a line to autoload.log next to the core AND to the RetroArch log.
  * Genesis Plus GX uses log_cb as a bare function pointer (retro_log_printf_t),
- * so we call log_cb(...) directly, not log_cb.log(...).
- *
- * The log file is written to autoload_log_dir (which may differ from
- * autoload_dir when a fallback directory was used). If autoload_log_dir
- * is also empty, we fall back to writing "autoload.log" in the current
- * working directory so the user can always find diagnostic output. */
+ * so we call log_cb(...) directly, not log_cb.log(...). */
 static void autoload_logf(const char *fmt, ...)
 {
    char    line[1024];
@@ -3615,26 +3545,16 @@ static void autoload_logf(const char *fmt, ...)
    vsnprintf(line, sizeof(line), fmt, ap);
    va_end(ap);
 
-   /* Always write to RetroArch log (log_cb is never NULL thanks to default_logger) */
-   log_cb(RETRO_LOG_INFO, "[autoload] %s\n", line);
+   if (log_cb)
+      log_cb(RETRO_LOG_INFO, "[autoload] %s\n", line);
 
-   /* Write to autoload.log file */
+   if (autoload_dir[0] != '\0')
    {
       char logpath[AUTOLOAD_MAX_PATH + 32];
       FILE *fp;
-      if (autoload_log_dir[0] != '\0')
-         snprintf(logpath, sizeof(logpath), "%s%cautoload.log",
-                  autoload_log_dir, AUTOLOAD_PATH_SEP);
-      else
-         snprintf(logpath, sizeof(logpath), "autoload.log");  /* cwd fallback */
-
+      snprintf(logpath, sizeof(logpath), "%s%cautoload.log", autoload_dir, AUTOLOAD_PATH_SEP);
       fp = fopen(logpath, "a");
       if (fp) { fprintf(fp, "%s\n", line); fclose(fp); }
-      else
-      {
-         /* Last resort: if we can't open the log file, at least tell RetroArch */
-         log_cb(RETRO_LOG_WARN, "[autoload] could not write to %s\n", logpath);
-      }
    }
 }
 
@@ -3650,10 +3570,9 @@ static void autoload_log_rotate(int keep_runs)
    int         count = 0, seen = 0;
    size_t      got;
 
-   if (autoload_log_dir[0] != '\0')
-      snprintf(logpath, sizeof(logpath), "%s%cautoload.log", autoload_log_dir, AUTOLOAD_PATH_SEP);
-   else
-      snprintf(logpath, sizeof(logpath), "autoload.log");
+   if (autoload_dir[0] == '\0')
+      return;
+   snprintf(logpath, sizeof(logpath), "%s%cautoload.log", autoload_dir, AUTOLOAD_PATH_SEP);
 
    fp = fopen(logpath, "rb");
    if (!fp)
@@ -3833,8 +3752,14 @@ static void autoload_try_load_state(void)
    size_t          state_size = 0;
    size_t          plen;
 
-   /* Resolve the core directory using OS API with fallbacks */
-   autoload_ensure_dir();
+   autoload_get_self_dir(autoload_dir, sizeof(autoload_dir));
+   if (autoload_dir[0] == '\0')
+   {
+      if (log_cb)
+         log_cb(RETRO_LOG_WARN,
+               "[autoload] could not resolve core directory\n");
+      return;
+   }
 
    autoload_get_self_name(autoload_core_name, sizeof(autoload_core_name));
    autoload_log_rotate(AUTOLOAD_MAX_RUNS - 1);  /* keep 24; this run makes 25 */
@@ -3847,11 +3772,7 @@ static void autoload_try_load_state(void)
       else    ts[0] = '\0';
       autoload_logf("--- autoload run --- core=%s  %s", autoload_core_name, ts);
    }
-   autoload_logf("core directory : %s", autoload_dir[0] ? autoload_dir : "(unresolved)");
-
-   if (autoload_dir[0] == '\0')
-      autoload_logf("WARNING       : core dir unresolved — config file search will fail. "
-                     "Place the .cfg next to the core .dll/.so, or check file permissions.");
+   autoload_logf("core directory : %s", autoload_dir);
 
    autoload_get_self_cfg(cfg_path, sizeof(cfg_path));
    autoload_logf("config file   : %s", cfg_path);
@@ -4370,9 +4291,10 @@ void retro_init(void)
 
    environ_cb(RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL, &level);
 
-   log_cb = default_logger;
    if (environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log))
       log_cb = log.log;
+   else
+      log_cb = NULL;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, NULL))
       libretro_supports_bitmasks = true;
