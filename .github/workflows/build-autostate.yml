@@ -8,6 +8,16 @@
 #   • Android armeabi-v7a
 #   • Android x86_64
 #
+# IMPORTANT: The Genesis Plus GX Makefile.libretro uses a version script
+# (link.T) in its SHARED linker flags. On ELF targets (Linux, Android) this
+# works fine — internal symbols are hidden from the export table but remain
+# resolvable within the shared library. On PE targets (Windows DLLs via
+# MinGW), the version script causes the linker to treat "local" symbols as
+# truly invisible, so core files (genesis.o, cdd.o, etc.) cannot resolve
+# symbols like `config`, `log_cb`, `load_archive` that are defined in
+# libretro.o. The fix is to override SHARED for Windows builds, dropping
+# the --version-script and using a plain -shared instead.
+#
 # Artifacts are uploaded so you can download them directly from the
 # GitHub Actions run page without needing a release.
 #
@@ -23,6 +33,11 @@ on:
 jobs:
   # ------------------------------------------------------------------ #
   # Windows 64-bit (MinGW cross-compile)                               #
+  #                                                                     #
+  # We use platform=unix with MinGW compilers instead of platform=win,  #
+  # because the "win" platform target uses --version-script which       #
+  # breaks MinGW PE linking (internal symbols become unresolvable).     #
+  # platform=unix + SHARED override produces a working DLL.             #
   # ------------------------------------------------------------------ #
   build-win64:
     name: Windows x64 (MinGW)
@@ -42,13 +57,14 @@ jobs:
       - name: Build
         run: |
           make -f Makefile.libretro \
-               platform=win \
+               platform=unix \
                CC=x86_64-w64-mingw32-gcc \
                CXX=x86_64-w64-mingw32-g++ \
+               SHARED="-shared -static-libgcc -static-libstdc++" \
                -j$(nproc)
 
       - name: Rename artifact
-        run: mv genesis_plus_gx_libretro.dll genesis_plus_gx_libretro_win64.dll 2>/dev/null || true
+        run: mv genesis_plus_gx_libretro.so genesis_plus_gx_libretro_win64.dll 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,13 +93,14 @@ jobs:
       - name: Build
         run: |
           make -f Makefile.libretro \
-               platform=win \
+               platform=unix \
                CC=i686-w64-mingw32-gcc \
                CXX=i686-w64-mingw32-g++ \
+               SHARED="-shared -static-libgcc -static-libstdc++" \
                -j$(nproc)
 
       - name: Rename artifact
-        run: mv genesis_plus_gx_libretro.dll genesis_plus_gx_libretro_win32.dll 2>/dev/null || true
+        run: mv genesis_plus_gx_libretro.so genesis_plus_gx_libretro_win32.dll 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
