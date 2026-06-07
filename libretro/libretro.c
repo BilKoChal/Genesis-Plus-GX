@@ -9,6 +9,10 @@
  * block below is adapted accordingly: calls use  log_cb(...)  instead
  * of  log_cb.log(...).
  *
+ * The autoload block is SELF-CONTAINED: it includes every header it
+ * needs and forward-declares every external symbol it references, so
+ * it compiles regardless of where it is pasted in the file.
+ *
  * Apply these changes to the upstream libretro/libretro.c from:
  *   https://github.com/libretro/Genesis-Plus-GX
  * ======================================================================= */
@@ -41,6 +45,16 @@
  * A line "[autoload] ..." is written both to the RetroArch log and to
  * "autoload.log" beside the core, so problems are easy to diagnose.       */
 
+/* --- Self-contained includes --- */
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <libretro.h>
+#include <streams/file_stream.h>
+
 #ifdef _WIN32
 #include <windows.h>
 #include <time.h>
@@ -55,6 +69,13 @@
 #define AUTOLOAD_MAX_PATH   4096
 #define AUTOLOAD_PATH_SEP   '/'
 #endif
+
+/* --- Forward declarations for symbols defined elsewhere in libretro.c -- *
+ * Genesis Plus GX declares:  retro_log_printf_t log_cb;                   *
+ * and the libretro API requires:  retro_serialize_size(), retro_unserialize() */
+extern retro_log_printf_t log_cb;
+extern size_t retro_serialize_size(void);
+extern bool retro_unserialize(const void *data, size_t size);
 
 #define AUTOLOAD_MAX_RUNS 25   /* keep only the latest N runs in autoload.log */
 #define AUTOLOAD_MAX_PATHS 16  /* max number of save_path entries in the config */
