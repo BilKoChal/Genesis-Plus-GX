@@ -1,0 +1,198 @@
+# .github/workflows/build-autostate.yml
+#
+# Builds the patched genesis_plus_gx_libretro core for:
+#   • Windows 64-bit  (MinGW cross-compile on Ubuntu)
+#   • Windows 32-bit  (MinGW cross-compile on Ubuntu)
+#   • Linux 64-bit
+#   • Android arm64-v8a
+#   • Android armeabi-v7a
+#   • Android x86_64
+#
+# Artifacts are uploaded so you can download them directly from the
+# GitHub Actions run page without needing a release.
+#
+# Trigger: every push and pull-request, plus manual dispatch.
+
+name: Build Genesis Plus GX autostate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:      # allows one-click manual runs from the Actions tab
+
+jobs:
+  # ------------------------------------------------------------------ #
+  # Windows 64-bit (MinGW cross-compile)                               #
+  # ------------------------------------------------------------------ #
+  build-win64:
+    name: Windows x64 (MinGW)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-mingw-w64-x86-64 \
+            g++-mingw-w64-x86-64 \
+            make
+
+      - name: Build
+        run: |
+          make -f Makefile.libretro \
+               platform=win \
+               CC=x86_64-w64-mingw32-gcc \
+               CXX=x86_64-w64-mingw32-g++ \
+               -j$(nproc)
+
+      - name: Rename artifact
+        run: mv genesis_plus_gx_libretro.dll genesis_plus_gx_libretro_win64.dll 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis_plus_gx_libretro_win64
+          path: genesis_plus_gx_libretro_win64.dll
+
+  # ------------------------------------------------------------------ #
+  # Windows 32-bit (MinGW cross-compile)                               #
+  # ------------------------------------------------------------------ #
+  build-win32:
+    name: Windows x86 (MinGW)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 toolchain (32-bit)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-mingw-w64-i686 \
+            g++-mingw-w64-i686 \
+            make
+
+      - name: Build
+        run: |
+          make -f Makefile.libretro \
+               platform=win \
+               CC=i686-w64-mingw32-gcc \
+               CXX=i686-w64-mingw32-g++ \
+               -j$(nproc)
+
+      - name: Rename artifact
+        run: mv genesis_plus_gx_libretro.dll genesis_plus_gx_libretro_win32.dll 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis_plus_gx_libretro_win32
+          path: genesis_plus_gx_libretro_win32.dll
+
+  # ------------------------------------------------------------------ #
+  # Linux 64-bit                                                       #
+  # ------------------------------------------------------------------ #
+  build-linux64:
+    name: Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            make
+
+      - name: Build
+        run: |
+          make -f Makefile.libretro \
+               platform=unix \
+               -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis_plus_gx_libretro_linux64
+          path: genesis_plus_gx_libretro.so
+
+  # ------------------------------------------------------------------ #
+  # Android — arm64-v8a / armeabi-v7a / x86_64                        #
+  #                                                                    #
+  # The Genesis Plus GX Makefile.libretro has no "android" platform    #
+  # case; it falls through to unix. We use platform=unix with the NDK #
+  # Clang toolchain overriding CC/CXX, and override SHARED to drop    #
+  # the version-script (Android linker does not support it).          #
+  # ------------------------------------------------------------------ #
+  build-android:
+    name: Android ${{ matrix.abi }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            ndk_target: aarch64-linux-android
+            artifact_suffix: android_arm64-v8a
+
+          - abi: armeabi-v7a
+            ndk_target: armv7a-linux-androideabi
+            artifact_suffix: android_armeabi-v7a
+
+          - abi: x86_64
+            ndk_target: x86_64-linux-android
+            artifact_suffix: android_x86_64
+
+    env:
+      ANDROID_API: 21
+      NDK_VERSION: "26.3.11579264"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install NDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;${{ env.NDK_VERSION }}" 2>&1 | tail -3
+          echo "NDK_ROOT=${ANDROID_HOME}/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install make
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends make
+
+      - name: Build
+        run: |
+          TOOLCHAIN=${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64
+          CC="${TOOLCHAIN}/bin/${{ matrix.ndk_target }}${{ env.ANDROID_API }}-clang"
+          CXX="${TOOLCHAIN}/bin/${{ matrix.ndk_target }}${{ env.ANDROID_API }}-clang++"
+          AR="${TOOLCHAIN}/bin/llvm-ar"
+          RANLIB="${TOOLCHAIN}/bin/llvm-ranlib"
+          STRIP="${TOOLCHAIN}/bin/llvm-strip"
+
+          # platform=unix sets TARGET=genesis_plus_gx_libretro.so and fpic=-fPIC
+          # We override SHARED: Android linker doesn't support --version-script
+          # (Genesis Plus GX uses link.T version script by default)
+          make -f Makefile.libretro \
+            platform=unix \
+            CC="$CC" \
+            CXX="$CXX" \
+            AR="$AR" \
+            RANLIB="$RANLIB" \
+            STRIP="$STRIP" \
+            SHARED="-shared -fPIC" \
+            -j$(nproc)
+
+      - name: Stage artifact
+        run: |
+          cp genesis_plus_gx_libretro.so genesis_plus_gx_libretro_${{ matrix.artifact_suffix }}.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis_plus_gx_libretro_${{ matrix.artifact_suffix }}
+          path: genesis_plus_gx_libretro_${{ matrix.artifact_suffix }}.so
